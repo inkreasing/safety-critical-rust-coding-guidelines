@@ -262,11 +262,6 @@ Table 1 – Guidelines applicable to Rust in general (safe Rust, no unsafe code 
      -
      -
      - The requirements of customized destructor and customized copy constructor apply to rust. Rust defaults the destructor by dropping all fields and can create a default copy constructor using "derive(Clone)". Customization can be done by implementing the Clone or Drop trait manually. Even though this is most often used for memory management which requires unsafe code the problem is in general not specific to unsafe rust and therefore this rule also applies to safe rust. In rust this rule would be something like "if the clone trait is implemented (unless it is derived) the drop trait should also be implemented. If the drop trait is implemented the clone trait should not be derived. It should either be implemented manually or not implemented at all."
-   * - Rule 16.6.1
-     -
-     -
-     -
-     - The issue that symmetric operators that are implemented for different rhs and lhs types can call different implementation depending on the order of parameters maps to rust: https://play.rust-lang.org/?version=stable&mode=debug&edition=2024&gist=9f3b71b8d78f915f55198e61ae7ad1d0 Issues regarding implicit conversion and member/non-member implementations don't map to rust.
    * - Rule 18.4.1
      -
      -
@@ -276,7 +271,25 @@ Table 1 – Guidelines applicable to Rust in general (safe Rust, no unsafe code 
      -
      -
      -
-     - Rust does not have "noexcept" functions, but extern "C" functions behave similar to them. If a panic tries to exit such a function the program is aborted. Therefore the rationale applies to these functions.
+     - Rust does not have "noexcept" functions, but extern "C" functions behave similar to them. If a function with this ABI is written in rust the compiler inserts panic guards that abort the program if a panic would exit such a function. Therefore the rationale applies to these functions. A panic exiting such a function is UB.
+
+       .. code-block:: rust
+          fn main() {
+              test(); // program abort
+              let tu: extern "C" fn() = unsafe { std::mem::transmute(test_unwind as extern "C-unwind" fn()) };
+              tu(); // UB
+          }
+          
+          extern "C" fn test() {
+              // compiler inserted panic abort guard
+              panic!("test");
+          }
+          
+          extern "C-unwind" fn test_unwind() {
+              panic!("test2");
+          }
+
+       In this example the compiler inserts a abort guard in the ``test`` function, but not in the ``test_unwind`` function. Calling the ``test`` function therefore aborts the program. Calling the ``test_unwind`` function with the "C" ABI is UB, since a panic exits the function.
    * - Rule 18.5.2
      -
      -
@@ -301,12 +314,27 @@ Table 1 – Guidelines applicable to Rust in general (safe Rust, no unsafe code 
      -
      -
      -
-     - In declarative macros, non-tt metavariables as arguments (e.g. ``expr``) are inserted as AST nodes and cannot be broken up. -> does not apply Using tt-metavariables it  is possible, since they are simply inserted as tokens -> applies Since proc macros also operate on streams of token trees, it applies the same Example
+     - In declarative macros, non-tt metavariables as arguments (e.g. ``expr``) are inserted as AST nodes and cannot be broken up. -> does not apply Using tt-metavariables it is possible, since they are simply inserted as tokens -> applies Since proc macros also operate on streams of token trees, it applies the same.
+      
+       .. code-block:: rust
+          macro_rules! mtt {
+              ($($x:tt)*) => ( $($x)* * 3 );
+          }
+          macro_rules! mexpr {
+              ($x:expr) => ( $x * 3 );
+          }
+          
+          fn main() {
+              dbg!(mexpr!(1 + 2));
+              dbg!(mtt!(1 + 2));
+          }
+
+       In this example the first macro call evaluates to 9 and the second one to 7.
    * - Rule 21.2.3
      -
      -
      -
-     - Same rationale applies.
+     - Rust provides the ``Command``-API in its standard library that provide similar features. This API has better support for escaping arguments than the C++ equivalent. The issues of platform specific path search and program behaviour still apply fully.
    * - Rule 21.6.1
      -
      -
@@ -817,6 +845,9 @@ Table 3 – Guidelines not currently applicable to Rust
    * - Rule 16.5.2
      -
      - Rust does not have a customizable addressof operator.
+   * - Rule 16.6.1
+     -
+     - While it is possible in rust to call different implementations of symmetric operators depending on the order of the paramters, this issue is mostly concerned with implicit conversions. Since rust does not have such implicit conversions this rule does not map to rust.
    * - Rule 17.8.1
      -
      - Rust does not support specialization or overloaded functions.
